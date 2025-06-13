@@ -1,0 +1,105 @@
+# Install necessary libraries
+!pip install fastapi uvicorn nest-asyncio pyngrok tensorflow
+
+# Add your ngrok authtoken
+!ngrok config add-authtoken <YOUR_AUTH_TOKEN>  # Replace <YOUR_AUTH_TOKEN> with your ngrok token
+
+# Import libraries
+from fastapi import FastAPI
+from pydantic import BaseModel
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+import re
+import nest_asyncio
+from pyngrok import ngrok
+import uvicorn
+
+# Apply nest_asyncio for running FastAPI in Colab
+nest_asyncio.apply()
+
+# FastAPI app setup
+app = FastAPI()
+
+# Component input model
+class Component(BaseModel):
+    component_id: str
+    specifications: dict
+    lifecycle_data: dict
+
+# Datasheet input model
+class DatasheetRequest(BaseModel):
+    text: str
+
+# 1. AI Model Setup for Predicting EOL
+def create_model():
+    model = Sequential([
+        Dense(64, activation='relu', input_shape=(10,)),  # Example input shape
+        Dense(32, activation='relu'),
+        Dense(1, activation='sigmoid')  # Binary classification: EOL or not
+    ])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
+
+# Train a mock model (replace with real training in production)
+def train_model():
+    model = create_model()
+    X_train = tf.random.normal((100, 10))  # Mock data
+    y_train = tf.random.uniform((100,), maxval=2, dtype=tf.int32)  # Mock labels
+    model.fit(X_train, y_train, epochs=1)  # Reduced epochs for demo
+    return model
+
+# Load or train model
+model = train_model()
+
+# 2. Rule-based Datasheet Parsing
+def parse_voltage_range(text):
+    matches = re.findall(r"(\d+(\.\d+)?\s*V)\s*(to|-)\s*(\d+(\.\d+)?\s*V)", text, re.IGNORECASE)
+    if matches:
+        return [{"entity": "voltage range", "value": f"{match[0]} to {match[3]}"} for match in matches]
+    return []
+
+# 3. API Endpoints
+
+# EOL prediction with query parameters (for testing in browser)
+@app.get("/predict_eol/")
+async def predict_eol_with_query(component_id: str, voltage: str, current: str):
+    # Generate mock input for prediction (real data processing will replace this)
+    mock_input = tf.random.normal((1, 10))  # Example input shape
+    prediction = model.predict(mock_input)
+    eol_status = "Near End of Life" if prediction[0][0] > 0.5 else "Operational"
+    return {
+        "component_id": component_id,
+        "specifications": {"voltage": voltage, "current": current},
+        "eol_status": eol_status,
+        "confidence": float(prediction[0][0])
+    }
+
+# EOL prediction with POST method (for testing via Postman)
+@app.post("/predict_eol/")
+async def predict_eol_endpoint(component: Component):
+    mock_input = tf.random.normal((1, 10))  # Example input shape
+    prediction = model.predict(mock_input)
+    eol_status = "Near End of Life" if prediction[0][0] > 0.5 else "Operational"
+    return {
+        "component_id": component.component_id,
+        "eol_status": eol_status,
+        "confidence": float(prediction[0][0])
+    }
+
+# Datasheet parsing using POST method (for testing via Postman)
+@app.post("/parse_datasheet/")
+async def parse_datasheet_endpoint(request: DatasheetRequest):
+    parsed_data = parse_voltage_range(request.text)  # Call rule-based function
+    return {"parsed_data": parsed_data}
+
+@app.get("/")
+async def root():
+    return {"message": "AI-Powered Smart Component Management is running!"}
+
+# Expose the API using ngrok
+public_url = ngrok.connect(8000).public_url
+print(f"Public URL: {public_url}")
+
+# Run the API server
+uvicorn.run(app, host="0.0.0.0", port=8000)
